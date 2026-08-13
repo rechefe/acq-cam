@@ -360,6 +360,117 @@ def performance_vs_snr(cfg: Config, ebn0_list, N: int, n_trials: int, seed: int,
     return cached("fig4_performance_vs_snr", params, compute, force=force)
 
 
+def performance_vs_snr_full(cfg: Config, ebn0_list, N: int, n_trials: int, seed: int,
+                             target_pfa: float = 0.01, force: bool = False):
+    """Like performance_vs_snr, but additionally sweeps false-alarm probability
+    per Eb/N0 (random valid-but-wrong access address, random CFO/theta0/timing)
+    at the SAME calibrated tau/threshold used for detection -- for reporting
+    a full misdetect/false-alarm/RMS-accuracy picture at a given operating
+    point (e.g. a new (B, OSR) configuration), not just Pd and RMS.
+
+    IMPORTANT: for the CAM, Pfa against a *different, valid* access address is
+    NOT monotonically safe at low tau the way one might assume, and is NOT
+    worst-case at low SNR either -- empirically it gets WORSE as SNR
+    increases, because a clean (low-noise) wrong-AA key can sit structurally
+    closer to a codebook row than noise would ever put it (cross-AA Hamming
+    distance for this differential/thermometer encoding is measured at
+    ~30-40% of W, not the ~50% a good discriminating code would give, mostly
+    because all BLE packets share the same 8-bit preamble and the
+    differential/Gaussian-filtered encoding has limited local diversity).
+    So tau is calibrated here against Pfa at the WORST-case (highest) Eb/N0 in
+    ebn0_list, not against a single mid-SNR detection-probability target --
+    the latter (used by performance_vs_snr/Table I) does not actually bound
+    high-SNR Pfa and was never checked against it before this function
+    existed. B1/B2 do not show this problem (full complex correlation
+    discriminates cross-AA cleanly; empirically Pfa~0 at every SNR tested),
+    so their threshold keeps the original detection-side calibration.
+
+    cam_argmin has no natural false-alarm concept (it always returns an
+    estimate, never abstains) so its Pfa column is NaN.
+    """
+    params = dict(cfg=cfg.as_dict(), ebn0_list=list(ebn0_list), N=N,
+                  n_trials=n_trials, seed=seed, target_pfa=target_pfa,
+                  kind="performance_vs_snr_full_v2")
+
+    def compute():
+        rng = np.random.default_rng(seed)
+        tx = make_tx(cfg)
+        cb = make_codebook(cfg, N=N)
+        cam = CAM(cb.rows)
+        ebn0_worst = max(ebn0_list)
+        tau = calibrate_tau(cfg, cb, ebn0=ebn0_worst, target_pfa=target_pfa,
+                             n_trials=max(n_trials, 400), seed=seed)
+
+        bank = bl.build_correlator_bank(N=N, df_min=cfg.df_min, df_max=cfg.df_max,
+                                         n_sym=cfg.n_sym, osr=cfg.osr,
+                                         access_address=cfg.access_address)
+        threshold = calibrate_b_threshold(bank, cfg, ebn0=10.0, target_pd=0.7,
+                                           n_trials=400, rng=np.random.default_rng(seed + 1))
+
+        methods = ["cam_run_midpoint", "cam_argmin", "b1_sequential", "b2_parallel"]
+        pdet = np.zeros((len(methods), len(ebn0_list)))
+        rms = np.zeros((len(methods), len(ebn0_list)))
+        pfa = np.full((len(methods), len(ebn0_list)), np.nan)
+        run_len_mean = np.zeros(len(ebn0_list))
+
+        for ei, ebn0 in enumerate(ebn0_list):
+            errs = {m: [] for m in methods}
+            hits = {m: 0 for m in methods}
+            run_lens = []
+            for _ in range(n_trials):
+                true_df = rng.uniform(cfg.df_min, cfg.df_max)
+                r = run_channel(tx, true_df, cfg.osr, ebn0, rng)
+                key = encode_waveform(r, cfg.B, coding=cfg.coding, diff_delay=cfg.diff_delay)
+
+                m_vec = cam.query(key, tau)
+                res_rm = dec.run_midpoint(m_vec, cb.df_grid)
+                if res_rm.detected:
+                    hits["cam_run_midpoint"] += 1
+                    errs["cam_run_midpoint"].append(res_rm.df_hat - true_df)
+                    run_lens.append(res_rm.run_length)
+
+                res_am = dec.argmin_baseline(cb.rows, key, cb.df_grid)
+                hits["cam_argmin"] += 1
+                errs["cam_argmin"].append(res_am.df_hat - true_df)
+
+                mags = bl.correlate_bank(r, bank)
+                k_hat = int(np.argmax(mags))
+                b_detected = bool(mags[k_hat] >= threshold)
+                for bm in ("b1_sequential", "b2_parallel"):
+                    if b_detected:
+                        hits[bm] += 1
+                        errs[bm].append(bank.df_grid[k_hat] - true_df)
+
+            fa_counts = {m: 0 for m in methods}
+            for _ in range(n_trials):
+                aa = random_valid_access_address(rng)
+                tx_wrong = tx_waveform(n_sym=cfg.n_sym, osr=cfg.osr, access_address=aa)
+                df_wrong = rng.uniform(cfg.df_min, cfg.df_max)
+                r_wrong = run_channel(tx_wrong, df_wrong, cfg.osr, ebn0, rng)
+                key_wrong = encode_waveform(r_wrong, cfg.B, coding=cfg.coding,
+                                             diff_delay=cfg.diff_delay)
+                if dec.any_fire(cam.query(key_wrong, tau)):
+                    fa_counts["cam_run_midpoint"] += 1
+
+                mags_wrong = bl.correlate_bank(r_wrong, bank)
+                if bool(mags_wrong.max() >= threshold):
+                    fa_counts["b1_sequential"] += 1
+                    fa_counts["b2_parallel"] += 1
+
+            for mi, m in enumerate(methods):
+                pdet[mi, ei] = hits[m] / n_trials
+                rms[mi, ei] = np.sqrt(np.mean(np.square(errs[m]))) if errs[m] else np.nan
+                if m != "cam_argmin":
+                    pfa[mi, ei] = fa_counts[m] / n_trials
+            run_len_mean[ei] = np.mean(run_lens) if run_lens else np.nan
+
+        return dict(methods=np.array(methods), ebn0_list=np.array(ebn0_list),
+                    pdet=pdet, rms=rms, pfa=pfa, run_len_mean=run_len_mean,
+                    tau=np.array(tau), threshold=np.array(threshold), W=np.array(cb.W))
+
+    return cached("performance_vs_snr_full", params, compute, force=force)
+
+
 # ---------------------------------------------------------------------------
 # Fig 5: threshold (tau) and grid (delta) design surface
 # ---------------------------------------------------------------------------
