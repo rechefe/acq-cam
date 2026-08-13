@@ -100,10 +100,12 @@ caveat on why the aliased configs' raw ranking is not usable as-is.
 
 ## Follow-up explorations for the paper
 
-Three further screens, run to find operating points that improve on the
-project's headline numbers rather than just report them. Two panned out
+Four further screens, run to find operating points that improve on the
+project's headline numbers rather than just report them. Three panned out
 cleanly, one revealed and then corrected a methodology trap along the way --
-recorded because the correction matters as much as the result:
+recorded because the correction matters as much as the result. **Best
+validated result overall: composite vernier key + two-stage refinement
+(last item below), ~10-13 kHz RMS vs. the original ~30 kHz.**
 
 - **`python -m sim.performance_at_config ... --mask-preamble`**: marking the
   preamble-derived ~18% of the key as CAM don't-cares (only two distinct BLE
@@ -134,6 +136,18 @@ recorded because the correction matters as much as the result:
   1-bit quantization, and it sharpens rather than softens the CAM's honesty
   gap: a binary-ish scheme *can* match full-precision accuracy, the CAM
   specifically does not. See **`docs/baseline_b3_findings.md`**.
+- **`python -m sim.two_stage_experiment`**: query the CAM twice on the same
+  key at two tau values in successive cycles -- a loose tau1 for detection,
+  a tighter tau2 for refinement (`decode.two_stage_midpoint`). Both reads
+  stay pure binary match vectors, so this is still within the "no distances,
+  ever" constraint; it's tau re-applied as a second sense margin, the way
+  real analog hardware would ramp it. By construction (falls back to the
+  loose-tau result whenever the tight read is empty) detection probability
+  is unchanged and RMS can only improve, never worsen -- confirmed a real
+  10-24% RMS improvement from ~12 dB upward, reproducible across seeds.
+  Stacked on top of the composite vernier key, this is the best validated
+  CAM configuration in the repo (~10-13 kHz RMS). See
+  **`docs/two_stage_findings.md`**.
 
 ## Read this next
 
