@@ -152,14 +152,40 @@ shortlist candidates for the noiseless collision check; every RMS/Pd/Pfa
 claim needs the full Pfa-calibrated, multi-hundred-trial pipeline, checked
 across at least 2-3 seeds, before being reported as a result.
 
+## Combining with preamble masking: a trade-off, not a free win
+
+Unlike the single-lag case (`figures/performance_*_maskpre.md`, where
+masking the preamble-derived ~18% of the key was a strict improvement --
+better detection, same RMS, same Pfa), masking the composite key's
+preamble-derived bits is a genuine trade-off. Checked at N=32, 800-1200
+trials, two seeds:
+
+| Eb/N0 | Unmasked RMS | Masked RMS | Unmasked Pd | Masked Pd |
+|---|---|---|---|---|
+| 6 | 10.6 kHz | 12.7 kHz | 0.27 | **0.81** |
+| 10 | 10.3 kHz | 12.9 kHz | 1.00 | 1.00 |
+| 16 | 13.4 kHz | 19.1 kHz | 1.00 | 1.00 |
+| 20 | 14.2 kHz | 20.4 kHz | 1.00 | 1.00 |
+
+Masking gives a real, reproducible low-SNR detection win (0.27 -> 0.81 at
+6 dB, consistent across seeds) but costs 30-45% worse RMS from 10 dB
+upward, also reproducible. The likely reason this differs from the
+single-lag case: in the composite key, the *fine* (D=3) segment is what
+carries the precise CFO information, and its preamble-derived samples,
+while not useful for discriminating *which packet*, still carry real CFO
+precision -- masking them removes signal that the single-lag encoding
+didn't have to begin with (there, the masked segment was uniformly weak).
+
+**Recommendation:** use the unmasked composite key as the default (best
+RMS across the whole range, and still detects reasonably by 8-10 dB); only
+add preamble masking if the application specifically needs faster
+acquisition at very low SNR and can tolerate worse precision once acquired.
+
 ## Not yet done
 
 - The split sweep above only tried B_coarse/B_fine in {2,3,4} with a
   2-segment key. Not tested: 3+ segment composites (e.g. coarse+medium+fine),
   or non-thermometer codings for the fine segment.
-- Not tested: pairing with the preamble-masking result
-  (`figures/performance_*_maskpre.md`) — masking the preamble on top of the
-  composite key is a natural next combination and should be cheap to check.
 - Decoding here still uses plain run_midpoint over the full concatenated
   row ordering. A decoder that explicitly reads the coarse segment first to
   pick a coarse bin, then refines with the fine segment, was not built or

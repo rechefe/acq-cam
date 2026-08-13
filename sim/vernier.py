@@ -80,3 +80,21 @@ def build_composite_codebook(lags: list[LagSpec], N: int | None = None, delta: f
         rows[k] = composite_encode(sig, osr, lags).astype(bool)
 
     return CompositeCodebook(rows=rows, df_grid=grid, W=W, N=N_actual, delta=delta, lags=lags)
+
+
+def composite_preamble_mask(cb: CompositeCodebook, n_sym: int = 40, osr: int = 4) -> np.ndarray:
+    """Ternary mask (N, W) marking the preamble-derived bits of EACH segment
+    as don't-care, mirroring experiments.preamble_dont_care_mask but summed
+    over the concatenated composite key (each segment has its own preamble
+    window, since diff_delay differs per segment)."""
+    mask = np.zeros((cb.N, cb.W), dtype=bool)
+    offset = 0
+    for lag in cb.lags:
+        diff_delay = lag.D * osr
+        n_z = n_sym * osr - diff_delay
+        cw = code_width(lag.B, lag.coding)
+        preamble_samples = max(0, 8 * osr - diff_delay)
+        n_masked = preamble_samples * cw
+        mask[:, offset:offset + n_masked] = True
+        offset += n_z * cw
+    return mask

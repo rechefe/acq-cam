@@ -28,7 +28,7 @@ import os
 import numpy as np
 
 from . import plots
-from .vernier import LagSpec, build_composite_codebook, composite_encode
+from .vernier import LagSpec, build_composite_codebook, composite_encode, composite_preamble_mask
 from .codebook import build_codebook
 from .tx import tx_waveform, random_valid_access_address
 from .channel import run_channel
@@ -63,9 +63,8 @@ def _calibrate_tau(encode_fn, cam, tau_range, n_sym, osr, ebn0_worst, target_pfa
     return best
 
 
-def _sweep(encode_fn, rows, df_grid, tau, tx, n_sym, osr, ebn0_list, n_trials, seed):
+def _sweep(encode_fn, cam, df_grid, tau, tx, n_sym, osr, ebn0_list, n_trials, seed):
     rng = np.random.default_rng(seed + 500)
-    cam = CAM(rows)
     pdet = np.zeros(len(ebn0_list))
     rms = np.zeros(len(ebn0_list))
     pfa = np.zeros(len(ebn0_list))
@@ -87,19 +86,21 @@ def _sweep(encode_fn, rows, df_grid, tau, tx, n_sym, osr, ebn0_list, n_trials, s
     return pdet, rms, pfa
 
 
-def _run_one(encode_fn, cb, tx, n_sym, osr, ebn0_list, n_trials, seed, target_pfa, label):
-    cam = CAM(cb.rows)
+def _run_one(encode_fn, cb, tx, n_sym, osr, ebn0_list, n_trials, seed, target_pfa, label,
+             mask=None):
+    cam = CAM(cb.rows, mask=mask)
     tau_range = range(int(0.10 * cb.W), int(0.40 * cb.W), max(1, cb.W // 150))
     tau = _calibrate_tau(encode_fn, cam, list(tau_range), n_sym, osr,
                           ebn0_worst=max(ebn0_list), target_pfa=target_pfa,
                           n_trials=max(300, n_trials // 2), seed=seed)
-    pdet, rms, pfa = _sweep(encode_fn, cb.rows, cb.df_grid, tau, tx, n_sym, osr,
+    pdet, rms, pfa = _sweep(encode_fn, cam, cb.df_grid, tau, tx, n_sym, osr,
                              ebn0_list, n_trials, seed)
-    return dict(W=cb.W, tau=tau, pdet=pdet, rms=rms, pfa=pfa, label=label)
+    effective_W = int(cb.W - mask[0].sum()) if mask is not None else int(cb.W)
+    return dict(W=cb.W, effective_W=effective_W, tau=tau, pdet=pdet, rms=rms, pfa=pfa, label=label)
 
 
 def run(n_sym=40, osr=4, N=32, ebn0_list=None, n_trials=600, seed=42,
-        target_pfa=0.01, lags=None, single_Bs=(3, 4)):
+        target_pfa=0.01, lags=None, single_Bs=(3, 4), mask_preamble=False):
     """Compare a composite key against one or more single-lag baselines.
 
     Default lags=[D1B2, D3B2] (W=1216). A sweep over D_fine in {2,3,4} (see
@@ -129,6 +130,12 @@ def run(n_sym=40, osr=4, N=32, ebn0_list=None, n_trials=600, seed=42,
     result["composite"] = _run_one(encode_comp, cb_comp, tx, n_sym, osr, ebn0_list,
                                     n_trials, seed, target_pfa, f"Composite {lag_str}")
 
+    if mask_preamble:
+        mask = composite_preamble_mask(cb_comp, n_sym=n_sym, osr=osr)
+        result["composite_maskpre"] = _run_one(
+            encode_comp, cb_comp, tx, n_sym, osr, ebn0_list, n_trials, seed, target_pfa,
+            f"Composite {lag_str} + preamble mask", mask=mask)
+
     for B in single_Bs:
         cb_single = build_codebook(N=N, df_min=-150e3, df_max=150e3, n_sym=n_sym, osr=osr,
                                     B=B, diff_delay=osr)
@@ -145,7 +152,8 @@ def make_figure(result, tag="vernier"):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(plots.IEEE_WIDTH_IN * 2 + 0.3, 2.3))
     ebn0 = result["ebn0_list"]
     series_keys = [k for k in result if k != "ebn0_list"]
-    colors = {"composite": "#4c72b0", "single_B3": "#dd8452", "single_B4": "#55a868"}
+    colors = {"composite": "#4c72b0", "composite_maskpre": "#9467bd",
+              "single_B3": "#dd8452", "single_B4": "#55a868"}
     for key in series_keys:
         d = result[key]
         color = colors.get(key)
@@ -173,8 +181,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--trials", type=int, default=600)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--mask-preamble", action="store_true")
     args = parser.parse_args()
-    result = run(n_trials=args.trials, seed=args.seed)
+    result = run(n_trials=args.trials, seed=args.seed, mask_preamble=args.mask_preamble)
 
     fig_path = make_figure(result)
     print("wrote", fig_path)
@@ -182,7 +191,8 @@ def main():
     lines = ["# Vernier composite-key vs. single-lag baselines\n"]
     for key in [k for k in result if k != "ebn0_list"]:
         d = result[key]
-        lines.append(f"## {d['label']} (W={d['W']}, tau={d['tau']})\n")
+        w_note = f", effective_W={d['effective_W']}" if d.get("effective_W", d["W"]) != d["W"] else ""
+        lines.append(f"## {d['label']} (W={d['W']}, tau={d['tau']}{w_note})\n")
         lines.append("| Eb/N0 | Pd | RMS (kHz) | Pfa |")
         lines.append("|---|---|---|---|")
         for i, e in enumerate(result["ebn0_list"]):
