@@ -152,10 +152,11 @@ def fired_set_heatmap(cfg: Config, true_cfos, N: int, tau: int, ebn0: float,
 # ---------------------------------------------------------------------------
 
 def false_alarm_rate(cfg: Config, cb, tau: int, ebn0: float, n_trials: int,
-                      rng: np.random.Generator) -> float:
+                      rng: np.random.Generator, mask: np.ndarray | None = None) -> float:
     """Pfa = P(any row fires) when the input is NOT the codebook's access
-    address (random valid AA, random CFO/theta0/timing/noise)."""
-    cam = CAM(cb.rows)
+    address (random valid AA, random CFO/theta0/timing/noise). Optional
+    ternary don't-care mask (e.g. to exclude preamble-derived bits)."""
+    cam = CAM(cb.rows, mask=mask)
     fa = 0
     for _ in range(n_trials):
         aa = random_valid_access_address(rng)
@@ -170,7 +171,7 @@ def false_alarm_rate(cfg: Config, cb, tau: int, ebn0: float, n_trials: int,
 
 
 def calibrate_tau(cfg: Config, cb, ebn0: float, target_pfa: float, n_trials: int,
-                   seed: int, tau_range=None):
+                   seed: int, tau_range=None, mask: np.ndarray | None = None):
     """Pfa(tau) is monotonically non-decreasing in tau (a looser threshold can
     only admit more false alarms), so the best operating point is the
     LARGEST tau that still satisfies the false-alarm budget -- loosest
@@ -183,7 +184,7 @@ def calibrate_tau(cfg: Config, cb, ebn0: float, target_pfa: float, n_trials: int
     tau_range = list(tau_range)
     best_tau = tau_range[0]
     for tau in tau_range:
-        pfa = false_alarm_rate(cfg, cb, tau, ebn0, n_trials, rng)
+        pfa = false_alarm_rate(cfg, cb, tau, ebn0, n_trials, rng, mask=mask)
         if pfa <= target_pfa:
             best_tau = tau
         else:
@@ -192,13 +193,14 @@ def calibrate_tau(cfg: Config, cb, ebn0: float, target_pfa: float, n_trials: int
 
 
 def detection_prob_at_tau(cfg: Config, cb, tau: int, ebn0: float, n_trials: int,
-                           rng: np.random.Generator, true_df: float = 0.0) -> float:
+                           rng: np.random.Generator, true_df: float = 0.0,
+                           mask: np.ndarray | None = None) -> float:
     """P(nearest-grid-row fires) at true_df. Deliberately checks the single
     nearest row rather than any(m) over the whole bank: an any-of-N criterion
     is biased loose (only the best of N hypotheses needs to cross tau), which
     would pick an operating tau far looser than what actually gives a tight,
     resolving fired-set band."""
-    cam = CAM(cb.rows)
+    cam = CAM(cb.rows, mask=mask)
     tx = make_tx(cfg)
     nearest = int(np.argmin(np.abs(cb.df_grid - true_df)))
     hits = 0
@@ -211,7 +213,8 @@ def detection_prob_at_tau(cfg: Config, cb, tau: int, ebn0: float, n_trials: int,
 
 
 def calibrate_tau_for_detection(cfg: Config, cb, ebn0: float, target_pd: float,
-                                 n_trials: int, seed: int, tau_range=None) -> int:
+                                 n_trials: int, seed: int, tau_range=None,
+                                 mask: np.ndarray | None = None) -> int:
     """Operating tau chosen from the detection side: the SMALLEST tau that
     achieves >= target_pd against the true (on-grid) signal. A tighter tau
     gives better CFO resolution (narrower fired-set bands), so -- subject to
@@ -224,7 +227,7 @@ def calibrate_tau_for_detection(cfg: Config, cb, ebn0: float, target_pd: float,
     if tau_range is None:
         tau_range = range(int(0.05 * W), int(0.45 * W), max(1, W // 200))
     for tau in tau_range:
-        pd = detection_prob_at_tau(cfg, cb, tau, ebn0, n_trials, rng)
+        pd = detection_prob_at_tau(cfg, cb, tau, ebn0, n_trials, rng, mask=mask)
         if pd >= target_pd:
             return tau
     return list(tau_range)[-1]
@@ -360,8 +363,23 @@ def performance_vs_snr(cfg: Config, ebn0_list, N: int, n_trials: int, seed: int,
     return cached("fig4_performance_vs_snr", params, compute, force=force)
 
 
+def preamble_dont_care_mask(cfg: Config, cb) -> np.ndarray:
+    """Ternary mask (N, W) marking the preamble-derived portion of the key as
+    don't-care for every row -- only two distinct BLE preambles exist, so
+    that segment contributes little cross-AA discrimination (see
+    performance_vs_snr_full docstring). preamble_samples counts differential
+    samples whose window falls entirely within the 8-symbol preamble."""
+    preamble_samples = max(0, 8 * cfg.osr - cfg.diff_delay)
+    code_width = 2 ** cfg.B if cfg.coding != "gray" else cfg.B
+    n_masked_bits = preamble_samples * code_width
+    mask = np.zeros((cb.N, cb.W), dtype=bool)
+    mask[:, :n_masked_bits] = True
+    return mask
+
+
 def performance_vs_snr_full(cfg: Config, ebn0_list, N: int, n_trials: int, seed: int,
-                             target_pfa: float = 0.01, force: bool = False):
+                             target_pfa: float = 0.01, mask_preamble: bool = False,
+                             force: bool = False):
     """Like performance_vs_snr, but additionally sweeps false-alarm probability
     per Eb/N0 (random valid-but-wrong access address, random CFO/theta0/timing)
     at the SAME calibrated tau/threshold used for detection -- for reporting
@@ -390,16 +408,17 @@ def performance_vs_snr_full(cfg: Config, ebn0_list, N: int, n_trials: int, seed:
     """
     params = dict(cfg=cfg.as_dict(), ebn0_list=list(ebn0_list), N=N,
                   n_trials=n_trials, seed=seed, target_pfa=target_pfa,
-                  kind="performance_vs_snr_full_v2")
+                  mask_preamble=mask_preamble, kind="performance_vs_snr_full_v3")
 
     def compute():
         rng = np.random.default_rng(seed)
         tx = make_tx(cfg)
         cb = make_codebook(cfg, N=N)
-        cam = CAM(cb.rows)
+        mask = preamble_dont_care_mask(cfg, cb) if mask_preamble else None
+        cam = CAM(cb.rows, mask=mask)
         ebn0_worst = max(ebn0_list)
         tau = calibrate_tau(cfg, cb, ebn0=ebn0_worst, target_pfa=target_pfa,
-                             n_trials=max(n_trials, 400), seed=seed)
+                             n_trials=max(n_trials, 400), seed=seed, mask=mask)
 
         bank = bl.build_correlator_bank(N=N, df_min=cfg.df_min, df_max=cfg.df_max,
                                          n_sym=cfg.n_sym, osr=cfg.osr,
@@ -429,7 +448,7 @@ def performance_vs_snr_full(cfg: Config, ebn0_list, N: int, n_trials: int, seed:
                     errs["cam_run_midpoint"].append(res_rm.df_hat - true_df)
                     run_lens.append(res_rm.run_length)
 
-                res_am = dec.argmin_baseline(cb.rows, key, cb.df_grid)
+                res_am = dec.argmin_baseline(cb.rows, key, cb.df_grid, mask=mask)
                 hits["cam_argmin"] += 1
                 errs["cam_argmin"].append(res_am.df_hat - true_df)
 
@@ -464,9 +483,11 @@ def performance_vs_snr_full(cfg: Config, ebn0_list, N: int, n_trials: int, seed:
                     pfa[mi, ei] = fa_counts[m] / n_trials
             run_len_mean[ei] = np.mean(run_lens) if run_lens else np.nan
 
+        effective_W = int(cb.W - mask[0].sum()) if mask is not None else int(cb.W)
         return dict(methods=np.array(methods), ebn0_list=np.array(ebn0_list),
                     pdet=pdet, rms=rms, pfa=pfa, run_len_mean=run_len_mean,
-                    tau=np.array(tau), threshold=np.array(threshold), W=np.array(cb.W))
+                    tau=np.array(tau), threshold=np.array(threshold), W=np.array(cb.W),
+                    effective_W=np.array(effective_W))
 
     return cached("performance_vs_snr_full", params, compute, force=force)
 

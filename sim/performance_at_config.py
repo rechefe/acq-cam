@@ -18,12 +18,12 @@ from . import plots
 
 
 def make_report(B: int, osr: int, N: int, n_trials: int, seed: int, tag: str,
-                 ebn0_list=None, force: bool = False):
+                 ebn0_list=None, mask_preamble: bool = False, force: bool = False):
     if ebn0_list is None:
         ebn0_list = list(range(0, 21, 2))
     cfg = exp.Config(osr=osr, n_sym=exp.DEFAULT_N_SYM, B=B, diff_delay=osr)
     data = exp.performance_vs_snr_full(cfg, ebn0_list, N=N, n_trials=n_trials,
-                                        seed=seed, force=force)
+                                        seed=seed, mask_preamble=mask_preamble, force=force)
 
     import matplotlib.pyplot as plt
     plots.set_ieee_style()
@@ -62,8 +62,9 @@ def make_report(B: int, osr: int, N: int, n_trials: int, seed: int, tag: str,
     ax3.set_yscale("log")
     ax3.set_title("(c) CFO estimation accuracy")
 
+    mask_note = f", preamble masked ({int(data['effective_W'])}/{int(data['W'])} active bits)" if mask_preamble else ""
     fig.suptitle(f"Performance at B={B}, OSR={osr}, N={N} "
-                 f"(W={int(data['W'])}, $\\tau$={int(data['tau'])})", y=1.03)
+                 f"(W={int(data['W'])}, $\\tau$={int(data['tau'])}{mask_note})", y=1.03)
     fig.tight_layout(pad=0.4)
     path = os.path.join(plots.FIGURES_DIR, f"performance_{tag}.pdf")
     os.makedirs(plots.FIGURES_DIR, exist_ok=True)
@@ -79,7 +80,8 @@ def make_report(B: int, osr: int, N: int, n_trials: int, seed: int, tag: str,
         lines.append("| " + " | ".join(row) + " |")
     lines.append("")
     lines.append(f"tau={int(data['tau'])}, threshold={float(data['threshold']):.4f}, "
-                 f"W={int(data['W'])}, N={N}")
+                 f"W={int(data['W'])}, effective_W={int(data['effective_W'])}, N={N}, "
+                 f"mask_preamble={mask_preamble}")
     table_path = os.path.join(plots.FIGURES_DIR, f"performance_{tag}.md")
     with open(table_path, "w") as f:
         f.write("\n".join(lines) + "\n")
@@ -95,12 +97,17 @@ def main():
     parser.add_argument("--trials", type=int, default=800)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tag", type=str, default=None)
+    parser.add_argument("--mask-preamble", action="store_true")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
     tag = args.tag or f"B{args.B}_osr{args.osr}_N{args.N}"
+    if args.mask_preamble:
+        tag += "_maskpre"
 
     fig_path, table_path, data = make_report(args.B, args.osr, args.N, args.trials,
-                                              args.seed, tag, force=args.force)
+                                              args.seed, tag,
+                                              mask_preamble=args.mask_preamble,
+                                              force=args.force)
     print("wrote", fig_path)
     print("wrote", table_path)
 

@@ -98,6 +98,28 @@ the non-aliased configurations, larger B gives a higher encoder SNR (D=1,
 B=4 wins); see `figures/encoder_sensitivity.md` for the full table and the
 caveat on why the aliased configs' raw ranking is not usable as-is.
 
+## Follow-up explorations for the paper
+
+Two further screens, run to find operating points that improve on the
+project's headline numbers rather than just report them:
+
+- **`python -m sim.performance_at_config ... --mask-preamble`**: marking the
+  preamble-derived ~18% of the key as CAM don't-cares (only two distinct BLE
+  preambles exist, so that segment barely discriminates between packets)
+  improves the detection transition by ~2 dB at both the default and the
+  high-resolution config, at no cost to Pfa or RMS, using fewer bits. See
+  `figures/performance_*_maskpre.md`.
+- **`python -m sim.vernier_experiment`**: a composite ("vernier") key that
+  concatenates a coarse D=1-symbol differential segment (weak but
+  collision-free) with a fine D=3-symbol segment (strong but aliased alone)
+  eliminates far-CFO false-lock collisions entirely -- even for D=4, which
+  is catastrophic by itself -- and at matched bit budget is ~2x more
+  accurate on CFO than the best single-lag alternative, detecting ~2 dB
+  earlier, with no Pfa cost. See **`docs/vernier_findings.md`** for the
+  full writeup, including why the original "D>1 always aliases" framing
+  from the encoder-sensitivity study conflated two different failure modes
+  (harmless local resolution saturation vs. genuine far collisions).
+
 ## Read this next
 
 **`docs/findings.md`** documents one load-bearing deviation from the spec's
@@ -105,4 +127,5 @@ literal default (the differential-product sample lag) that the Fig 1/2
 sanity gate required, and the simulation's answers to the open questions in
 spec section 10 -- including a negative result (the binary CAM readout costs
 much more than the ~1-5 dB the spec hoped for) that matters for how the paper
-frames its contribution.
+frames its contribution. **`docs/vernier_findings.md`** documents the
+composite-key follow-up above, which recovers much of that lost accuracy.
