@@ -87,44 +87,56 @@ def _sweep(encode_fn, rows, df_grid, tau, tx, n_sym, osr, ebn0_list, n_trials, s
     return pdet, rms, pfa
 
 
+def _run_one(encode_fn, cb, tx, n_sym, osr, ebn0_list, n_trials, seed, target_pfa, label):
+    cam = CAM(cb.rows)
+    tau_range = range(int(0.10 * cb.W), int(0.40 * cb.W), max(1, cb.W // 150))
+    tau = _calibrate_tau(encode_fn, cam, list(tau_range), n_sym, osr,
+                          ebn0_worst=max(ebn0_list), target_pfa=target_pfa,
+                          n_trials=max(300, n_trials // 2), seed=seed)
+    pdet, rms, pfa = _sweep(encode_fn, cb.rows, cb.df_grid, tau, tx, n_sym, osr,
+                             ebn0_list, n_trials, seed)
+    return dict(W=cb.W, tau=tau, pdet=pdet, rms=rms, pfa=pfa, label=label)
+
+
 def run(n_sym=40, osr=4, N=32, ebn0_list=None, n_trials=600, seed=42,
-        target_pfa=0.01, tau_frac=0.22):
+        target_pfa=0.01, lags=None, single_Bs=(3, 4)):
+    """Compare a composite key against one or more single-lag baselines.
+
+    Default lags=[D1B2, D3B2] (W=1216). A sweep over D_fine in {2,3,4} (see
+    docs/vernier_findings.md) found ALL of them collision-free in the
+    noiseless construction check, and a quick (~250-trial, heuristic-tau)
+    screen made D_fine=4 look like a clear win -- but full-rigor validation
+    (Pfa-calibrated tau, 800-1200 trials, checked across 3 seeds) showed
+    D_fine=4 has a real, reproducible RMS instability at high SNR (accuracy
+    gets WORSE as SNR increases, sometimes ending up worse than the
+    single-lag baseline it was supposed to beat). D_fine=2 is stable but
+    less accurate than D_fine=3. D_fine=3 is the one that is both stable
+    AND the best of the validated options -- this is the important
+    methodological lesson from that sweep: a quick screen is only good
+    enough to shortlist candidates, never to declare a winner.
+    """
     if ebn0_list is None:
         ebn0_list = list(range(6, 21, 2))
+    if lags is None:
+        lags = [LagSpec(1, 2), LagSpec(3, 2)]
     tx = tx_waveform(n_sym=n_sym, osr=osr)
 
-    lags = [LagSpec(1, 2), LagSpec(3, 2)]
     cb_comp = build_composite_codebook(lags, N=N, df_min=-150e3, df_max=150e3,
                                         n_sym=n_sym, osr=osr)
     encode_comp = lambda r: composite_encode(r, osr, lags)
-    cam_comp = CAM(cb_comp.rows)
-    tau_range_comp = range(int(0.10 * cb_comp.W), int(0.40 * cb_comp.W), max(1, cb_comp.W // 150))
-    tau_comp = _calibrate_tau(encode_comp, cam_comp, list(tau_range_comp), n_sym, osr,
-                               ebn0_worst=max(ebn0_list), target_pfa=target_pfa,
-                               n_trials=max(300, n_trials // 2), seed=seed)
+    lag_str = "+".join(f"D{l.D}B{l.B}" for l in lags)
+    result = dict(ebn0_list=np.array(ebn0_list))
+    result["composite"] = _run_one(encode_comp, cb_comp, tx, n_sym, osr, ebn0_list,
+                                    n_trials, seed, target_pfa, f"Composite {lag_str}")
 
-    cb_single = build_codebook(N=N, df_min=-150e3, df_max=150e3, n_sym=n_sym, osr=osr,
-                                B=3, diff_delay=osr)
-    encode_single = lambda r: encode_waveform(r, 3, diff_delay=osr)
-    cam_single = CAM(cb_single.rows)
-    tau_range_single = range(int(0.10 * cb_single.W), int(0.40 * cb_single.W),
-                              max(1, cb_single.W // 150))
-    tau_single = _calibrate_tau(encode_single, cam_single, list(tau_range_single), n_sym, osr,
-                                 ebn0_worst=max(ebn0_list), target_pfa=target_pfa,
-                                 n_trials=max(300, n_trials // 2), seed=seed)
-
-    pdet_c, rms_c, pfa_c = _sweep(encode_comp, cb_comp.rows, cb_comp.df_grid, tau_comp,
-                                   tx, n_sym, osr, ebn0_list, n_trials, seed)
-    pdet_s, rms_s, pfa_s = _sweep(encode_single, cb_single.rows, cb_single.df_grid, tau_single,
-                                   tx, n_sym, osr, ebn0_list, n_trials, seed)
-
-    return dict(
-        ebn0_list=np.array(ebn0_list),
-        composite=dict(W=cb_comp.W, tau=tau_comp, pdet=pdet_c, rms=rms_c, pfa=pfa_c,
-                        label="Composite D1B2+D3B2"),
-        single=dict(W=cb_single.W, tau=tau_single, pdet=pdet_s, rms=rms_s, pfa=pfa_s,
-                    label="Single-lag D1B3 (matched W)"),
-    )
+    for B in single_Bs:
+        cb_single = build_codebook(N=N, df_min=-150e3, df_max=150e3, n_sym=n_sym, osr=osr,
+                                    B=B, diff_delay=osr)
+        encode_single = lambda r, B=B: encode_waveform(r, B, diff_delay=osr)
+        result[f"single_B{B}"] = _run_one(encode_single, cb_single, tx, n_sym, osr, ebn0_list,
+                                           n_trials, seed, target_pfa,
+                                           f"Single-lag D1B{B} (W={cb_single.W})")
+    return result
 
 
 def make_figure(result, tag="vernier"):
@@ -132,8 +144,11 @@ def make_figure(result, tag="vernier"):
     plots.set_ieee_style()
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(plots.IEEE_WIDTH_IN * 2 + 0.3, 2.3))
     ebn0 = result["ebn0_list"]
-    for key, color in [("composite", "#4c72b0"), ("single", "#dd8452")]:
+    series_keys = [k for k in result if k != "ebn0_list"]
+    colors = {"composite": "#4c72b0", "single_B3": "#dd8452", "single_B4": "#55a868"}
+    for key in series_keys:
         d = result[key]
+        color = colors.get(key)
         ax1.plot(ebn0, d["pdet"], marker="o", markersize=2, color=color, label=d["label"])
         rms_plot = np.where(d["pdet"] >= 0.1, d["rms"], np.nan)
         ax2.plot(ebn0, rms_plot / 1e3, marker="o", markersize=2, color=color, label=d["label"])
@@ -144,9 +159,7 @@ def make_figure(result, tag="vernier"):
     ax2.set_xlabel("Eb/N0 (dB)")
     ax2.set_ylabel("RMS CFO error (kHz)")
     ax2.set_title("(b) CFO estimation accuracy")
-    Wc, Ws = result["composite"]["W"], result["single"]["W"]
-    fig.suptitle(f"Composite vernier key vs. matched-W single-lag "
-                 f"(W={Wc} vs W={Ws})", y=1.03)
+    fig.suptitle("Composite vernier key vs. single-lag baselines", y=1.03)
     fig.tight_layout(pad=0.4)
     path = os.path.join(plots.FIGURES_DIR, f"{tag}_comparison.pdf")
     os.makedirs(plots.FIGURES_DIR, exist_ok=True)
@@ -166,8 +179,8 @@ def main():
     fig_path = make_figure(result)
     print("wrote", fig_path)
 
-    lines = ["# Vernier composite-key vs. matched-W single-lag\n"]
-    for key in ["composite", "single"]:
+    lines = ["# Vernier composite-key vs. single-lag baselines\n"]
+    for key in [k for k in result if k != "ebn0_list"]:
         d = result[key]
         lines.append(f"## {d['label']} (W={d['W']}, tau={d['tau']})\n")
         lines.append("| Eb/N0 | Pd | RMS (kHz) | Pfa |")

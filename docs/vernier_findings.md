@@ -99,16 +99,71 @@ the full range — not just locally around zero.
   vernier construction recovers much of the lost accuracy for free (no
   extra CAM logic, just a longer, differently-composed key).
 
+## Split sweep: is D1B2+D3B2 actually the best composite?
+
+The original composite result above used a hand-picked split. A follow-up
+swept the noiseless collision check (same methodology, `far_khz=75`,
+`near_frac=0.05`) over D_fine in {2,3,4} x B_coarse/B_fine in {2,3,4} (18
+configurations): **every single one was collision-free.** The composite
+construction is robust to the split choice on the collision-safety axis.
+
+That made W-efficiency the only apparent differentiator, and a quick screen
+(~250 trials/point, heuristic tau=0.22*W instead of the project's proper
+Pfa-calibrated tau) made **D_fine=4** combinations look clearly best —
+smaller W, more unique rows, and RMS as low as 3-9 kHz across 10-18 dB.
+
+**That lead did not survive full validation, and it's worth recording why.**
+Re-run at the project's actual methodology (Pfa-calibrated tau at
+worst-case SNR, 800-1500 trials/point, checked across 3 seeds):
+
+| Fine lag | RMS trend with SNR | Verdict |
+|---|---|---|
+| D_fine=2 | 14 -> 24 kHz, worse than D_fine=3 throughout | stable but mediocre |
+| **D_fine=3** | **11 -> 15 kHz, gently increasing, consistent across seeds** | **stable and best** |
+| D_fine=4 | 6 kHz at low SNR -> 20-38 kHz at high SNR, non-monotone, direction varies by seed | reproducibly unstable |
+
+D_fine=4's RMS *increasing* with SNR is backwards — accuracy should never
+get worse as noise drops. The likely mechanism: run_midpoint selects the
+*longest* contiguous fired run, not the closest one, and D=4's fine segment
+folds aggressively enough that at low noise a specific wrong-but-stable run
+can consistently win the length contest, whereas at moderate noise that
+near-tie gets broken randomly (helping about as often as it hurts). This
+wasn't caught by the noiseless collision check (which only asks whether two
+rows are near-identical, not whether the *decoder* reliably prefers the
+right one) or by the quick screen (too few trials, wrong tau methodology,
+and the SNR points tested happened to sit before the degradation onset).
+
+**Conclusion: D1B2+D3B2 (D_fine=3) remains the validated choice, and it
+turns out to beat an even bigger target than initially tested.** The
+comparison below adds a second baseline, single-lag D1B4 at W=2496 — *double*
+the composite's bit budget:
+
+| Eb/N0 | Composite D1B2+D3B2 (W=1216) RMS | Single D1B3 (W=1248) RMS | Single D1B4 (W=2496) RMS |
+|---|---|---|---|
+| 8 | 12.0 kHz | 20.0 kHz | 14.0 kHz |
+| 12 | 11.5 kHz | 28.8 kHz | 27.3 kHz |
+| 16 | 14.0 kHz | 31.4 kHz | 31.1 kHz |
+| 20 | 15.0 kHz | 31.0 kHz | 31.5 kHz |
+
+The composite key beats a single-lag baseline with **twice its bit budget**,
+not just a matched one. **Methodological lesson for the rest of this
+exploration:** a small-trial, heuristic-tau screen is only good enough to
+shortlist candidates for the noiseless collision check; every RMS/Pd/Pfa
+claim needs the full Pfa-calibrated, multi-hundred-trial pipeline, checked
+across at least 2-3 seeds, before being reported as a result.
+
 ## Not yet done
 
-- Only one composite split (B=2+B=2, D=1+D=3) was tuned by hand. A proper
-  sweep over the coarse/fine bit-width ratio and fine D would likely do
-  better still — this was a screen, not an optimization.
-- Not tested: composite keys with 3+ segments, or pairing with the
-  preamble-masking result (`figures/performance_*_maskpre.md`) — masking
-  the preamble on top of the composite key is a natural next combination.
+- The split sweep above only tried B_coarse/B_fine in {2,3,4} with a
+  2-segment key. Not tested: 3+ segment composites (e.g. coarse+medium+fine),
+  or non-thermometer codings for the fine segment.
+- Not tested: pairing with the preamble-masking result
+  (`figures/performance_*_maskpre.md`) — masking the preamble on top of the
+  composite key is a natural next combination and should be cheap to check.
 - Decoding here still uses plain run_midpoint over the full concatenated
   row ordering. A decoder that explicitly reads the coarse segment first to
   pick a coarse bin, then refines with the fine segment, was not built or
   compared -- it might do even better than the "let the CAM sort it out"
-  approach used here.
+  approach used here, and might also be what actually fixes D_fine=4's
+  instability (by not relying on longest-run-wins across the whole
+  concatenated key).
