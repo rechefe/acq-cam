@@ -100,8 +100,10 @@ caveat on why the aliased configs' raw ranking is not usable as-is.
 
 ## Follow-up explorations for the paper
 
-Two further screens, run to find operating points that improve on the
-project's headline numbers rather than just report them:
+Three further screens, run to find operating points that improve on the
+project's headline numbers rather than just report them. Two panned out
+cleanly, one revealed and then corrected a methodology trap along the way --
+recorded because the correction matters as much as the result:
 
 - **`python -m sim.performance_at_config ... --mask-preamble`**: marking the
   preamble-derived ~18% of the key as CAM don't-cares (only two distinct BLE
@@ -109,16 +111,29 @@ project's headline numbers rather than just report them:
   improves the detection transition by ~2 dB at both the default and the
   high-resolution config, at no cost to Pfa or RMS, using fewer bits. See
   `figures/performance_*_maskpre.md`.
-- **`python -m sim.vernier_experiment`**: a composite ("vernier") key that
-  concatenates a coarse D=1-symbol differential segment (weak but
-  collision-free) with a fine D=3-symbol segment (strong but aliased alone)
-  eliminates far-CFO false-lock collisions entirely -- even for D=4, which
-  is catastrophic by itself -- and at matched bit budget is ~2x more
-  accurate on CFO than the best single-lag alternative, detecting ~2 dB
-  earlier, with no Pfa cost. See **`docs/vernier_findings.md`** for the
-  full writeup, including why the original "D>1 always aliases" framing
-  from the encoder-sensitivity study conflated two different failure modes
-  (harmless local resolution saturation vs. genuine far collisions).
+- **`python -m sim.vernier_experiment [--mask-preamble]`**: a composite
+  ("vernier") key that concatenates a coarse D=1-symbol differential segment
+  (weak but collision-free) with a fine D=3-symbol segment (strong but
+  aliased alone) eliminates far-CFO false-lock collisions entirely -- even
+  for D=4, which is catastrophic by itself -- and beats a single-lag
+  baseline with *double* its bit budget by roughly 2x on RMS accuracy, with
+  no Pfa cost. A split sweep (D_fine in {2,3,4}) initially made D_fine=4
+  look even better in a quick screen, but that lead failed full validation
+  (reproducible RMS *increase* with SNR -- a red flag caught before it
+  shipped as a result); D_fine=3 remains the validated choice. See
+  **`docs/vernier_findings.md`** for both the collision-mechanism writeup
+  and that retraction.
+- **`python -m sim.baseline_b3_experiment`**: B3, a 1-bit sign-sign
+  correlator bank, added as a fair low-power peer to the CAM (B1/B2 use full
+  complex precision, which the CAM never gets either). Once calibration was
+  fixed to compare all three systems by the same Pfa-budget methodology
+  (an initial run made B3 look like it beat full-precision B1/B2 outright,
+  which turned out to be a calibration-methodology artifact, not a real
+  result), B3 matches B1/B2's RMS accuracy almost exactly (~3 kHz either
+  way) at a ~4-8 dB detection-threshold cost -- textbook-consistent for
+  1-bit quantization, and it sharpens rather than softens the CAM's honesty
+  gap: a binary-ish scheme *can* match full-precision accuracy, the CAM
+  specifically does not. See **`docs/baseline_b3_findings.md`**.
 
 ## Read this next
 
@@ -127,5 +142,5 @@ literal default (the differential-product sample lag) that the Fig 1/2
 sanity gate required, and the simulation's answers to the open questions in
 spec section 10 -- including a negative result (the binary CAM readout costs
 much more than the ~1-5 dB the spec hoped for) that matters for how the paper
-frames its contribution. **`docs/vernier_findings.md`** documents the
-composite-key follow-up above, which recovers much of that lost accuracy.
+frames its contribution. **`docs/vernier_findings.md`** and
+**`docs/baseline_b3_findings.md`** document the two follow-ups above.
