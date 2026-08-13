@@ -74,6 +74,30 @@ via `inspect`, not just convention). The one place true Hamming distances are
 used is `decode.argmin_baseline`, which bypasses `CAM` entirely and is
 labeled everywhere as a reference-only, unachievable-in-hardware upper bound.
 
+## Encoder-sensitivity study (diff_delay x B)
+
+```
+python -m sim.encoder_sensitivity              # --trials 500 --seed 42 by default
+```
+
+Noiseless codebook-construction sweep over diff_delay D in {1,2,3,4} symbols
+x B in {2,3,4} (N=128 requested hypotheses, +-150 kHz): unique row count,
+minimum adjacent Hamming distance, total endpoint-to-endpoint Hamming swing,
+W, and a monotonicity/aliasing check, plus an "encoder SNR" (swing / binomial
+noise std at Eb/N0=10 dB) ranking. Writes `figures/encoder_sensitivity.md`
+and `figures/encoder_sensitivity_heatmap.pdf`.
+
+**Headline result:** a naive bulk-phase estimate suggests only D=4 should
+alias within +-150 kHz; empirically **D=2 and D=3 alias too**, at every B
+tested -- individual bits wrap past their own nearest decision axis (a much
+finer threshold than the bulk estimate assumes) well before the bulk phase
+reference completes a half turn. Only **D=1 (the operating default used
+everywhere else in this repo) stays monotone across the full BLE range**,
+which is reassuring given the rest of the simulation depends on it. Among
+the non-aliased configurations, larger B gives a higher encoder SNR (D=1,
+B=4 wins); see `figures/encoder_sensitivity.md` for the full table and the
+caveat on why the aliased configs' raw ranking is not usable as-is.
+
 ## Read this next
 
 **`docs/findings.md`** documents one load-bearing deviation from the spec's
