@@ -156,3 +156,30 @@ area-reduction option if a design is willing to trade some margin, but OSR=1
 is not usable regardless of don't-care masking on its own** (the failure is
 structural misalignment, not a few noisy bits), agreeing with the spec's
 expectation.
+
+## Robustness extra: flat Rayleigh fading (spec section 1.2, optional)
+
+Quick check with the best validated configuration (composite vernier key,
+`docs/vernier_findings.md`), `channel.py`'s existing `fading=True` option
+(a single random complex gain applied to the whole packet), checked across
+3 seeds at 400 trials/point:
+
+| Eb/N0 | Pd, AWGN only | Pd, +Rayleigh fading | RMS, AWGN only | RMS, +fading |
+|---|---|---|---|---|
+| 10 dB | 1.000 | 0.59-0.63 | ~10.5-10.9 kHz | ~10.6-11.9 kHz |
+| 18 dB | 1.000 | 0.91-0.93 | ~13.8-13.9 kHz | ~13.0-13.2 kHz |
+
+Clean and reproducible: fading costs real detection probability (a classic
+Rayleigh outage effect -- deep fades drop effective SNR below the detection
+threshold for that trial), but **RMS accuracy among the trials that DO
+detect is essentially unchanged** (differences are within run-to-run noise,
+not a systematic degradation). The likely mechanism: a fading gain is a
+single random *complex* multiplier on the whole packet, i.e. a random
+amplitude AND a random phase -- and the differential product that cancels
+theta0 (spec section 2.1) cancels a constant multiplicative phase exactly
+the same way, for exactly the same reason. So fading only ever costs SNR
+margin (via the amplitude component), never accuracy (the phase component
+is free). This is a real, positive property worth stating explicitly in
+the paper rather than leaving as an implicit consequence of the theta0
+design: the same cancellation that handles unknown carrier phase also
+handles unknown fading phase, for free.
