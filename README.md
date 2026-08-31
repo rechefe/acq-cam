@@ -149,6 +149,45 @@ validated result overall: composite vernier key + two-stage refinement
   CAM configuration in the repo (~10-13 kHz RMS). See
   **`docs/two_stage_findings.md`**.
 
+## GPS L1 C/A acquisition (`sim/gps/`)
+
+A second application of the same CAM primitive, and a better fit than BLE:
+GNSS acquisition wants a detection plus a coarse bin index, not an estimate, so
+the binary-readout cost that limits the BLE result is close to free. See
+`docs/gps_findings.md`.
+
+```
+python -m pytest tests/gps/ -v
+python -m sim.gps.segmentation_study   [--trials 3000] [--seed 42] [--force]
+python -m sim.gps.sense_margin_study   [--trials 3000] [--seed 42] [--force]
+python -m sim.gps.comparison_study     [--trials 3000] [--seed 42] [--force]
+```
+
+The three studies share one Monte Carlo pass through the `cached_distances`
+npz cache, so run `segmentation_study` first and the other two are instant.
+Results are written to `figures/gps_*.md` plus `figures/gps_area_time_pareto.{pdf,png}`.
+
+| Module | Responsibility |
+|---|---|
+| `sim/gps/prn.py` | Gold code generator, gated against the IS-GPS-200 octal table |
+| `sim/gps/quantize.py` | 2-bit I/Q front end, sign and thermometer key mappings, the free 90-degree rotation |
+| `sim/gps/channel.py` | Signal generation at a specified C/N0 |
+| `sim/gps/codebook.py` | PRN x Doppler rows (built at theta=45 deg -- see findings) |
+| `sim/gps/segment.py` | Segmented match lines, multi-dwell fire accumulator |
+| `sim/gps/baselines.py` | FFT parallel-code-phase search, full-precision and 1-bit |
+| `sim/gps/experiments.py` | Config, calibration, characterization pass, search sizing |
+
+Placement principle behind the architecture: **sweep the rotations that are free
+in the quantized domain, store the ones that are not.** A 90-degree carrier-phase
+step is `(I,Q) -> (-Q,I)`, an exact bit permutation, so theta0 is swept and costs
+no rows; a Doppler hypothesis is a phase ramp, free on a precomputed row but not
+on a 2-bit key, so Doppler is stored.
+
+Headline: the boolean-readout tax over an equivalent 1-bit correlator is
+**+1.9 dB** (17 ms vs 11 ms to acquire at 38 dB-Hz), and segmentation trades
+dictionary size against acquisition time along a measured curve -- 5.37 Mbit at
+17 ms down to 0.65 Mbit at 65 ms.
+
 ## Read this next
 
 **`docs/findings.md`** documents one load-bearing deviation from the spec's
