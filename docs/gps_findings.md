@@ -1,5 +1,8 @@
 # GPS L1 C/A acquisition on the CAM -- findings
 
+*Written for a signal-processing reader. For the same story without the vocabulary,
+see [`gps_algorithm_explained.md`](gps_algorithm_explained.md).*
+
 Companion to `docs/findings.md` (the BLE study). Same primitive, different
 application, and it fits better -- for one specific reason. The BLE result is
 limited by *estimation*: the CAM's CFO estimate is ~10x worse than a correlator

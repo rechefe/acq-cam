@@ -153,8 +153,11 @@ validated result overall: composite vernier key + two-stage refinement
 
 A second application of the same CAM primitive, and a better fit than BLE:
 GNSS acquisition wants a detection plus a coarse bin index, not an estimate, so
-the binary-readout cost that limits the BLE result is close to free. See
-`docs/gps_findings.md`.
+the binary-readout cost that limits the BLE result is close to free.
+
+- `docs/gps_algorithm_explained.md` -- plain-language version, no signal-processing
+  background assumed. Start here.
+- `docs/gps_findings.md` -- the results write-up for specialists.
 
 ```
 python -m pytest tests/gps/ -v
