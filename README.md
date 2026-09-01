@@ -155,8 +155,8 @@ A second application of the same CAM primitive, and a better fit than BLE:
 GNSS acquisition wants a detection plus a coarse bin index, not an estimate, so
 the binary-readout cost that limits the BLE result is close to free.
 
-- `docs/gps_algorithm_explained.md` -- plain-language version, no signal-processing
-  background assumed. Start here.
+- `docs/gps_algorithm_explained.md` -- the algorithm and its baseline derived from
+  first principles, for engineers without a GNSS/DSP background. Start here.
 - `docs/gps_findings.md` -- the results write-up for specialists.
 
 ```
