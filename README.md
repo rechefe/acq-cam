@@ -198,13 +198,22 @@ self-contained, runs top to bottom in seconds to ~2 minutes, and ships with its
 outputs and figures already executed -- so they can be read without running
 anything. Every claim is computed rather than asserted.
 
+`00_algorithm.ipynb` is the odd one out and the best entry point: it implements
+the entire acquisition algorithm from scratch in numpy with no repo imports,
+with short explanations, then acquires a signal and cross-checks itself against
+`sim/gps` bit for bit.
+
 ```
 pip install jupyterlab            # if not already present
 jupyter lab notebooks/
 ```
 
+Start with `00_algorithm.ipynb` if you just want to see the algorithm; the
+numbered series after it is the measurement.
+
 | # | Notebook | Headline |
 |---|---|---|
+| 00 | `00_algorithm.ipynb` | **The whole algorithm, numpy only, ~40 lines** -- acquires a real signal end to end |
 | 01 | `01_signal.ipynb` | What arrives at the antenna: at 38 dB-Hz even a full-precision FFT picks the wrong code phase on one dwell |
 | 02 | `02_quantize.ipynb` | The 1-bit front end costs 1.96 dB, measured to 0.004 dB of theory; the 90 deg rotation is an exact bit permutation |
 | 03 | `03_codebook_cam.ipynb` | Firing the CAM; the theta=0 row trap; the theta0 sweep is load-bearing, not an optimization |
