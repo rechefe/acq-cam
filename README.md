@@ -191,6 +191,34 @@ Headline: the boolean-readout tax over an equivalent 1-bit correlator is
 dictionary size against acquisition time along a measured curve -- 5.37 Mbit at
 17 ms down to 0.65 Mbit at 65 ms.
 
+## Step-by-step notebooks (`notebooks/`)
+
+A guided walk through the whole GPS evaluation, one stage per notebook. Each is
+self-contained, runs top to bottom in seconds to ~2 minutes, and ships with its
+outputs and figures already executed -- so they can be read without running
+anything. Every claim is computed rather than asserted.
+
+```
+pip install jupyterlab            # if not already present
+jupyter lab notebooks/
+```
+
+| # | Notebook | Headline |
+|---|---|---|
+| 01 | `01_signal.ipynb` | What arrives at the antenna: at 38 dB-Hz even a full-precision FFT picks the wrong code phase on one dwell |
+| 02 | `02_quantize.ipynb` | The 1-bit front end costs 1.96 dB, measured to 0.004 dB of theory; the 90 deg rotation is an exact bit permutation |
+| 03 | `03_codebook_cam.ipynb` | Firing the CAM; the theta=0 row trap; the theta0 sweep is load-bearing, not an optimization |
+| 04 | `04_margin.ipynb` | The master formula verified term by term, and the +63 autocorrelation artifact behind its residual 10% gap |
+| 05 | `05_segmentation.ipynb` | 8.2x smaller dictionary, paid for with a hard decision worth ~13 points of Pd |
+| 06 | `06_sense_margin.ipynb` | The match line must resolve 1 part in 128, i.e. 6-7 effective bits |
+| 07 | `07_dwells.ipynb` | Binomial sizing (independence validated), the area/time curve, and why S = 1-3 is the efficient region |
+| 08 | `08_comparison.ipynb` | +1.9 dB over an equivalent 1-bit correlator, with the loss attributed |
+
+They complement `docs/gps_algorithm_explained.md`: that document derives the
+theory, the notebooks measure it. Notebook 04 in particular verifies the boxed
+detection formula factor by factor.
+
+
 ## Read this next
 
 **`docs/findings.md`** documents one load-bearing deviation from the spec's
