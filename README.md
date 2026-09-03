@@ -149,6 +149,102 @@ validated result overall: composite vernier key + two-stage refinement
   CAM configuration in the repo (~10-13 kHz RMS). See
   **`docs/two_stage_findings.md`**.
 
+## GPS L1 C/A acquisition (`sim/gps/`)
+
+A second application of the same CAM primitive, and a better fit than BLE:
+GNSS acquisition wants a detection plus a coarse bin index, not an estimate, so
+the binary-readout cost that limits the BLE result is close to free.
+
+- `docs/gps_algorithm_explained.md` -- the algorithm and its baseline derived from
+  first principles, for engineers without a GNSS/DSP background. Start here.
+- `docs/gps_findings.md` -- the results write-up for specialists.
+
+```
+python -m pytest tests/gps/ -v
+python -m sim.gps.segmentation_study   [--trials 3000] [--seed 42] [--force]
+python -m sim.gps.sense_margin_study   [--trials 3000] [--seed 42] [--force]
+python -m sim.gps.comparison_study     [--trials 3000] [--seed 42] [--force]
+```
+
+The three studies share one Monte Carlo pass through the `cached_distances`
+npz cache, so run `segmentation_study` first and the other two are instant.
+Results are written to `figures/gps_*.md` plus `figures/gps_area_time_pareto.{pdf,png}`.
+
+| Module | Responsibility |
+|---|---|
+| `sim/gps/prn.py` | Gold code generator, gated against the IS-GPS-200 octal table |
+| `sim/gps/quantize.py` | 2-bit I/Q front end, sign and thermometer key mappings, the free 90-degree rotation |
+| `sim/gps/channel.py` | Signal generation at a specified C/N0 |
+| `sim/gps/codebook.py` | PRN x Doppler rows (built at theta=45 deg -- see findings) |
+| `sim/gps/segment.py` | Segmented match lines, multi-dwell fire accumulator |
+| `sim/gps/baselines.py` | FFT parallel-code-phase search, full-precision and 1-bit |
+| `sim/gps/experiments.py` | Config, calibration, characterization pass, search sizing |
+
+Placement principle behind the architecture: **sweep the rotations that are free
+in the quantized domain, store the ones that are not.** A 90-degree carrier-phase
+step is `(I,Q) -> (-Q,I)`, an exact bit permutation, so theta0 is swept and costs
+no rows; a Doppler hypothesis is a phase ramp, free on a precomputed row but not
+on a 2-bit key, so Doppler is stored.
+
+Headline: the boolean-readout tax over an equivalent 1-bit correlator is
+**+1.9 dB** (17 ms vs 11 ms to acquire at 38 dB-Hz), and segmentation trades
+dictionary size against acquisition time along a measured curve -- 5.37 Mbit at
+17 ms down to 0.65 Mbit at 65 ms.
+
+## Step-by-step notebooks (`notebooks/`)
+
+A guided walk through the whole GPS evaluation, one stage per notebook. Each is
+self-contained, runs top to bottom in seconds to ~2 minutes, and ships with its
+outputs and figures already executed -- so they can be read without running
+anything. Every claim is computed rather than asserted.
+
+`00_algorithm.ipynb` is the odd one out and the best entry point: it implements
+the entire acquisition algorithm from scratch in numpy with no repo imports,
+with short explanations, then acquires a signal and cross-checks itself against
+`sim/gps` bit for bit.
+
+```
+pip install jupyterlab            # if not already present
+jupyter lab notebooks/
+```
+
+Start with `00_algorithm.ipynb` if you just want to see the algorithm; the
+numbered series after it is the measurement.
+
+| # | Notebook | Headline |
+|---|---|---|
+| 00 | `00_algorithm.ipynb` | **The whole algorithm, numpy only, ~40 lines** -- acquires a real signal end to end |
+| 01 | `01_signal.ipynb` | What arrives at the antenna: at 38 dB-Hz even a full-precision FFT picks the wrong code phase on one dwell |
+| 02 | `02_quantize.ipynb` | The 1-bit front end costs 1.96 dB, measured to 0.004 dB of theory; the 90 deg rotation is an exact bit permutation |
+| 03 | `03_codebook_cam.ipynb` | Firing the CAM; the theta=0 row trap; the theta0 sweep is load-bearing, not an optimization |
+| 04 | `04_margin.ipynb` | The master formula verified term by term, and the +63 autocorrelation artifact behind its residual 10% gap |
+| 05 | `05_segmentation.ipynb` | 8.2x smaller dictionary, paid for with a hard decision worth ~13 points of Pd |
+| 06 | `06_sense_margin.ipynb` | The match line must resolve 1 part in 128, i.e. 6-7 effective bits |
+| 07 | `07_dwells.ipynb` | Binomial sizing (independence validated), the area/time curve, and why S = 1-3 is the efficient region |
+| 08 | `08_comparison.ipynb` | +1.9 dB over an equivalent 1-bit correlator, with the loss attributed |
+| 09 | `09_benchmark.ipynb` | A detector-agnostic benchmark on **gps-sdr-sim** signals: CAM and a float FFT on identical real-ephemeris skies. +5.4 dB end to end -- 2 dB worse than our own signal model predicted |
+
+They complement `docs/gps_algorithm_explained.md`: that document derives the
+theory, the notebooks measure it. Notebook 04 in particular verifies the boxed
+detection formula factor by factor.
+
+Notebooks 00 and 09 are the two that stand alone. 00 implements the algorithm
+from scratch; 09 writes the *test* from scratch -- a harness that takes any
+detector as a black box, feeds it a sky, and scores how much of that sky comes
+back. Both detectors are calibrated on training scenarios and evaluated on
+geometries they never saw, and both are handed byte-identical data.
+
+Its signal is **not ours**: notebook 09 drives the benchmark from
+[gps-sdr-sim](https://github.com/osqzss/gps-sdr-sim) (vendored under
+`third_party/`, MIT), which builds the constellation from real broadcast
+ephemeris. That change was forced -- our own signal model advanced the carrier
+correctly but never advanced the code phase between dwells, so Doppler-induced
+code drift silently vanished. On real signals the CAM's deficit widens from
+3.4 dB to 5.4 dB; the leading explanation is near-far, which a real sky has and a
+uniform random draw does not. It runs in about 11 minutes and generates ~150 MB
+of signal data (gitignored).
+
+
 ## Read this next
 
 **`docs/findings.md`** documents one load-bearing deviation from the spec's

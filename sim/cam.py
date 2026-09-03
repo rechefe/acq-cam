@@ -50,3 +50,27 @@ class CAM:
         distance = mismatch.sum(axis=1)
         match = distance <= tau
         return match
+
+    def _query_batch(self, keys: np.ndarray, tau: int) -> np.ndarray:
+        """Vectorized `query` over many keys at once: (M, W) -> (M, N) bool.
+
+        Private, and deliberately so: it is a simulation-speed convenience with
+        exactly the semantics of calling `query` M times, not a new architectural
+        primitive. It returns booleans only, like `query`, and the per-row
+        distances stay local to this function.
+        """
+        keys = np.asarray(keys).astype(bool)
+        if keys.ndim != 2 or keys.shape[1] != self.W:
+            raise ValueError(f"keys must have shape (M, {self.W}), got {keys.shape}")
+        packed_rows = np.packbits(self._rows, axis=1)
+        packed_keys = np.packbits(keys, axis=1)
+        popcount = np.unpackbits(
+            (packed_keys[:, None, :] ^ packed_rows[None, :, :]).reshape(-1, packed_rows.shape[1]),
+            axis=1,
+        ).sum(axis=1).reshape(len(keys), self.N)
+        if self._mask is not None:
+            keep = np.unpackbits(np.packbits(~self._mask, axis=1), axis=1)[:, : self.W]
+            popcount = np.einsum("mnw,nw->mn",
+                                 (keys[:, None, :] != self._rows[None, :, :]), keep[:, : self.W])
+        return popcount <= tau
+
