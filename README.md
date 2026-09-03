@@ -222,7 +222,7 @@ numbered series after it is the measurement.
 | 06 | `06_sense_margin.ipynb` | The match line must resolve 1 part in 128, i.e. 6-7 effective bits |
 | 07 | `07_dwells.ipynb` | Binomial sizing (independence validated), the area/time curve, and why S = 1-3 is the efficient region |
 | 08 | `08_comparison.ipynb` | +1.9 dB over an equivalent 1-bit correlator, with the loss attributed |
-| 09 | `09_benchmark.ipynb` | A detector-agnostic benchmark: CAM and a float FFT on identical random skies. +3.4 dB measured end to end, and ranking turns out to be worth almost nothing |
+| 09 | `09_benchmark.ipynb` | A detector-agnostic benchmark on **gps-sdr-sim** signals: CAM and a float FFT on identical real-ephemeris skies. +5.4 dB end to end -- 2 dB worse than our own signal model predicted |
 
 They complement `docs/gps_algorithm_explained.md`: that document derives the
 theory, the notebooks measure it. Notebook 04 in particular verifies the boxed
@@ -230,10 +230,19 @@ detection formula factor by factor.
 
 Notebooks 00 and 09 are the two that stand alone. 00 implements the algorithm
 from scratch; 09 writes the *test* from scratch -- a harness that takes any
-detector as a black box, renders random 4-10 satellite skies, and scores how much
-of each sky comes back. Both detectors are calibrated on a training set and
-evaluated on a test set they never saw. It runs in about 7 minutes and is the only
-place the CAM and a conventional receiver are handed byte-identical data.
+detector as a black box, feeds it a sky, and scores how much of that sky comes
+back. Both detectors are calibrated on training scenarios and evaluated on
+geometries they never saw, and both are handed byte-identical data.
+
+Its signal is **not ours**: notebook 09 drives the benchmark from
+[gps-sdr-sim](https://github.com/osqzss/gps-sdr-sim) (vendored under
+`third_party/`, MIT), which builds the constellation from real broadcast
+ephemeris. That change was forced -- our own signal model advanced the carrier
+correctly but never advanced the code phase between dwells, so Doppler-induced
+code drift silently vanished. On real signals the CAM's deficit widens from
+3.4 dB to 5.4 dB; the leading explanation is near-far, which a real sky has and a
+uniform random draw does not. It runs in about 11 minutes and generates ~150 MB
+of signal data (gitignored).
 
 
 ## Read this next

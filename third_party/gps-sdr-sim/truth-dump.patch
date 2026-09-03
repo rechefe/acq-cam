@@ -1,0 +1,48 @@
+--- gpssim.c
++++ gpssim_patched.c
+@@ -1728,6 +1728,15 @@
+ 	return;
+ }
+ 
++/* --- truth dump: added for the acq-cam benchmark ---------------------------
++ * Observation only. Writes internal channel state (PRN, carrier Doppler, code
++ * frequency, code phase, gain) once per 0.1 s block to the file named by the
++ * GPSSIM_TRUTH environment variable. When that variable is unset nothing is
++ * opened and no branch is taken, so the generated I/Q is byte-identical to
++ * upstream. Nothing here touches signal generation.
++ */
++static FILE *truth_fp = NULL;
++
+ int main(int argc, char *argv[])
+ {
+ 	clock_t tstart,tend;
+@@ -2239,6 +2248,16 @@
+ 	// Allocate visible satellites
+ 	allocateChannel(chan, eph[ieph], ionoutc, grx, xyz[0], elvmask);
+ 
++	{	/* truth dump: open and write header (no-op unless GPSSIM_TRUTH is set) */
++		const char *truth_path = getenv("GPSSIM_TRUTH");
++		if (truth_path != NULL)
++		{
++			truth_fp = fopen(truth_path, "w");
++			if (truth_fp != NULL)
++				fprintf(truth_fp, "block,gps_sec,prn,f_carr_hz,f_code_chips_s,code_phase_chip,gain\n");
++		}
++	}
++
+ 	for(i=0; i<MAX_CHAN; i++)
+ 	{
+ 		if (chan[i].prn>0)
+@@ -2298,6 +2317,12 @@
+ 					gain[i] = (int)(path_loss * ant_gain * 128.0); // scaled by 2^7
+ 				else
+ 					gain[i] = fixed_gain; // hold the power level constant
++
++				/* truth dump: state for the 0.1 s block starting at grx */
++				if (truth_fp != NULL)
++					fprintf(truth_fp, "%d,%.6f,%d,%.9f,%.9f,%.9f,%d\n",
++						iumd, grx.sec, chan[i].prn, chan[i].f_carr,
++						chan[i].f_code, chan[i].code_phase, gain[i]);
+ 			}
+ 		}
+ 
